@@ -1,0 +1,11 @@
+name = "dropship-automation-backend"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+[vars]
+MARKUP_PERCENT = "40"
+STORE_ORIGIN = "https://azaan0000.github.io"
+
+[[kv_namespaces]]
+binding = "TOKEN_STORE"
+id = "12f8ef7b121d4073bde05128fd597edc"
