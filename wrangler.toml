@@ -1,0 +1,20 @@
+name = "dropship-automation-backend"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+[vars]
+MARKUP_PERCENT = "40"
+STORE_ORIGIN = "https://azaan0000.github.io"
+WORKER_ORIGIN = "https://dropship-worker.azaanbk30.workers.dev"
+# CONFIG: replace with the real Rapid Gateway API base URL once sandbox access is issued
+RAPIDGATEWAY_API_BASE = "https://api.rapid-gateway.com"
+
+# KV namespace for caching CJ access tokens
+# Create it first: wrangler kv namespace create TOKEN_STORE
+# Then paste the returned id below
+[[kv_namespaces]]
+binding = "TOKEN_STORE"
+id = "PASTE_YOUR_KV_NAMESPACE_ID_HERE"
+
+# Secret (do NOT put here) - set via terminal instead:
+# wrangler secret put CJ_API_KEY
