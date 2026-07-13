@@ -15,7 +15,7 @@ RAPIDGATEWAY_MERCHANT_ID = "576"
 # Then paste the returned id below
 [[kv_namespaces]]
 binding = "TOKEN_STORE"
-id = "PASTE_YOUR_KV_NAMESPACE_ID_HERE"
+id = "12f8ef7b121d4073bde05128fd597edc"
 
 # Secret (do NOT put here) - set via terminal instead:
 # wrangler secret put CJ_API_KEY
