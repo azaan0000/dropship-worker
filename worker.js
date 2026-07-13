@@ -49,15 +49,28 @@ async function getValidToken(env) {
   return fresh.data.accessToken;
 }
 
-async function cjFetch(env, path, options = {}) {
+// Client IP forward karne ke liye req object receive karein ge
+async function cjFetch(env, path, options = {}, req = null) {
   const token = await getValidToken(env);
+  
+  const headers = {
+    "CJ-Access-Token": token,
+    "Content-Type": "application/json",
+    ...(options.headers || {}),
+  };
+
+  // Asal user ka IP forward karne ka logic
+  if (req) {
+    const clientIP = req.headers.get("CF-Connecting-IP") || req.headers.get("X-Forwarded-For");
+    if (clientIP) {
+      headers["X-Forwarded-For"] = clientIP;
+      headers["Client-IP"] = clientIP;
+    }
+  }
+
   const res = await fetch(`${CJ_BASE}${path}`, {
     ...options,
-    headers: {
-      "CJ-Access-Token": token,
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
+    headers: headers,
   });
   return res.json();
 }
@@ -84,10 +97,10 @@ async function handleProducts(req, env) {
   const pageNum = url.searchParams.get("page") || "1";
   const categoryId = url.searchParams.get("categoryId") || "";
 
-  // Rate limit se bachne ke liye dynamic cache key banana
+  // Dynamic cache key
   const cacheKey = `products_cache:${keyword}:${pageNum}:${categoryId}`;
   
-  // Pehle KV store mein check karein ke data para hai ya nahi
+  // KV cache check
   const cachedResponse = await env.TOKEN_STORE.get(cacheKey);
   if (cachedResponse) {
     return new Response(cachedResponse, {
@@ -102,7 +115,8 @@ async function handleProducts(req, env) {
     ...(categoryId ? { categoryId } : {}),
   });
 
-  const data = await cjFetch(env, `/product/list?${qs.toString()}`, { method: "GET" });
+  // req object pass kar diya taake IP forward ho sake
+  const data = await cjFetch(env, `/product/list?${qs.toString()}`, { method: "GET" }, req);
 
   if (!data.result) {
     return new Response(JSON.stringify({ error: data.message }), {
@@ -122,7 +136,7 @@ async function handleProducts(req, env) {
 
   const finalResponseData = JSON.stringify({ products, total: data.data?.total || 0 });
 
-  // Response ko 5 minutes (300 seconds) ke liye cache kar rahe hain taake CJ blocks na kare
+  // 5 minutes caching
   await env.TOKEN_STORE.put(cacheKey, finalResponseData, { expirationTtl: 300 });
 
   return new Response(finalResponseData, {
@@ -135,7 +149,6 @@ async function handleProductDetail(req, env) {
   const pid = url.searchParams.get("pid");
   if (!pid) return new Response(JSON.stringify({ error: "pid required" }), { status: 400, headers: corsHeaders(env) });
 
-  // Single product detail ko bhi cache kar rahe hain
   const cacheKey = `product_detail:${pid}`;
   const cachedDetail = await env.TOKEN_STORE.get(cacheKey);
   if (cachedDetail) {
@@ -144,7 +157,8 @@ async function handleProductDetail(req, env) {
     });
   }
 
-  const data = await cjFetch(env, `/product/query?pid=${pid}`, { method: "GET" });
+  // req object pass kar diya taake IP forward ho sake
+  const data = await cjFetch(env, `/product/query?pid=${pid}`, { method: "GET" }, req);
   if (!data.result) {
     return new Response(JSON.stringify({ error: data.message }), { status: 500, headers: corsHeaders(env) });
   }
@@ -166,7 +180,6 @@ async function handleProductDetail(req, env) {
     variants,
   });
 
-  // Product detail ko bhi 5 minutes ke liye cache karein
   await env.TOKEN_STORE.put(cacheKey, finalDetailData, { expirationTtl: 300 });
 
   return new Response(finalDetailData, { 
@@ -194,7 +207,6 @@ async function getRapidGatewayToken(env) {
   if (!res.ok) throw new Error("Rapid Gateway auth failed: " + (await res.text()));
   const data = await res.json();
 
-  // Cache for ~55 minutes (typical OAuth2 client_credentials token lifetime is 1hr)
   await env.TOKEN_STORE.put(
     "rg_token",
     JSON.stringify({ accessToken: data.access_token, expiresAt: Date.now() + 55 * 60_000 })
@@ -205,8 +217,6 @@ async function getRapidGatewayToken(env) {
 // ---------- Checkout: Step 1 - create pending order + Rapid Gateway transaction ----------
 async function handleCheckoutCreate(req, env) {
   const body = await req.json();
-  // Expected body: { shippingCountryCode, shippingAddress, shippingCity, shippingProvince,
-  //   shippingCustomerName, shippingPhone, shippingZip, email, products: [{vid, quantity, sellingPrice}] }
 
   const orderNumber = `ORDER-${Date.now()}`;
   const totalAmountPKR = (body.products || []).reduce(
@@ -214,22 +224,20 @@ async function handleCheckoutCreate(req, env) {
     0
   );
 
-  // Save the pending order in KV so the webhook can find it once payment succeeds.
   const orderRecord = { ...body, orderNumber, status: "pending_payment", createdAt: Date.now() };
   await env.TOKEN_STORE.put(`order:${orderNumber}`, JSON.stringify(orderRecord), {
-    expirationTtl: 60 * 60 * 24 * 7, // 7 days
+    expirationTtl: 60 * 60 * 24 * 7, 
   });
 
   const token = await getRapidGatewayToken(env);
 
-  // GitHub Pages ke sub-path ke liye manually path add kiya gaya hai
   const successUrl = `${env.STORE_ORIGIN}/dropship-store/order-status.html?status=success&ref=${orderNumber}`;
   const failureUrl = `${env.STORE_ORIGIN}/dropship-store/order-status.html?status=failed&ref=${orderNumber}`;
   const checkoutUrlRedirect = `${env.STORE_ORIGIN}/dropship-store/order-status.html?status=complete&ref=${orderNumber}`;
 
   const txnRes = await fetch(`${env.RAPIDGATEWAY_API_BASE}/rapid/process-transaction`, {
     method: "POST",
-    redirect: "manual", // capture the redirect Location instead of following it
+    redirect: "manual", 
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/x-www-form-urlencoded",
@@ -266,8 +274,7 @@ async function handleCheckoutCreate(req, env) {
   });
 }
 
-async function pushOrderToCJ(env, orderRecord) {
-  // Internal helper: actually places the order with CJ once payment is confirmed.
+async function pushOrderToCJ(env, orderRecord, req) {
   const payload = {
     orderNumber: orderRecord.orderNumber,
     shippingZip: orderRecord.shippingZip,
@@ -280,13 +287,13 @@ async function pushOrderToCJ(env, orderRecord) {
     shippingPhone: orderRecord.shippingPhone,
     fromCountryCode: "CN",
     logisticName: orderRecord.logisticName || "CJPacket Ordinary",
-    products: orderRecord.products, // [{ vid, quantity }]
+    products: orderRecord.products, 
   };
 
   const data = await cjFetch(env, `/shopping/order/createOrderV2`, {
     method: "POST",
     body: JSON.stringify(payload),
-  });
+  }, req);
   return data;
 }
 
@@ -341,8 +348,7 @@ async function handlePaymentWebhook(req, env) {
     return new Response(JSON.stringify({ received: true }), { status: 200 });
   }
 
-  // Payment confirmed — now push the order to CJ automatically.
-  const cjResult = await pushOrderToCJ(env, stored);
+  const cjResult = await pushOrderToCJ(env, stored, req);
   stored.status = cjResult.result ? "fulfilled" : "fulfillment_failed";
   stored.cjResult = cjResult;
   await env.TOKEN_STORE.put(`order:${orderNumber}`, JSON.stringify(stored));
@@ -358,7 +364,7 @@ async function handleTrackOrder(req, env) {
   const orderId = url.searchParams.get("orderId");
   if (!orderId) return new Response(JSON.stringify({ error: "orderId required" }), { status: 400, headers: corsHeaders(env) });
 
-  const data = await cjFetch(env, `/shopping/order/getOrderDetail?orderId=${orderId}`, { method: "GET" });
+  const data = await cjFetch(env, `/shopping/order/getOrderDetail?orderId=${orderId}`, { method: "GET" }, req);
   return new Response(JSON.stringify(data), {
     headers: { "Content-Type": "application/json", ...corsHeaders(env) },
   });
