@@ -84,6 +84,17 @@ async function handleProducts(req, env) {
   const pageNum = url.searchParams.get("page") || "1";
   const categoryId = url.searchParams.get("categoryId") || "";
 
+  // Rate limit se bachne ke liye dynamic cache key banana
+  const cacheKey = `products_cache:${keyword}:${pageNum}:${categoryId}`;
+  
+  // Pehle KV store mein check karein ke data para hai ya nahi
+  const cachedResponse = await env.TOKEN_STORE.get(cacheKey);
+  if (cachedResponse) {
+    return new Response(cachedResponse, {
+      headers: { "Content-Type": "application/json", ...corsHeaders(env), "X-Cache": "HIT" },
+    });
+  }
+
   const qs = new URLSearchParams({
     pageNum,
     pageSize: "20",
@@ -109,8 +120,13 @@ async function handleProducts(req, env) {
     stock: p.listedNum || 0,
   }));
 
-  return new Response(JSON.stringify({ products, total: data.data?.total || 0 }), {
-    headers: { "Content-Type": "application/json", ...corsHeaders(env) },
+  const finalResponseData = JSON.stringify({ products, total: data.data?.total || 0 });
+
+  // Response ko 5 minutes (300 seconds) ke liye cache kar rahe hain taake CJ blocks na kare
+  await env.TOKEN_STORE.put(cacheKey, finalResponseData, { expirationTtl: 300 });
+
+  return new Response(finalResponseData, {
+    headers: { "Content-Type": "application/json", ...corsHeaders(env), "X-Cache": "MISS" },
   });
 }
 
@@ -118,6 +134,15 @@ async function handleProductDetail(req, env) {
   const url = new URL(req.url);
   const pid = url.searchParams.get("pid");
   if (!pid) return new Response(JSON.stringify({ error: "pid required" }), { status: 400, headers: corsHeaders(env) });
+
+  // Single product detail ko bhi cache kar rahe hain
+  const cacheKey = `product_detail:${pid}`;
+  const cachedDetail = await env.TOKEN_STORE.get(cacheKey);
+  if (cachedDetail) {
+    return new Response(cachedDetail, {
+      headers: { "Content-Type": "application/json", ...corsHeaders(env), "X-Cache": "HIT" },
+    });
+  }
 
   const data = await cjFetch(env, `/product/query?pid=${pid}`, { method: "GET" });
   if (!data.result) {
@@ -133,16 +158,20 @@ async function handleProductDetail(req, env) {
     image: v.variantImage,
   }));
 
-  return new Response(
-    JSON.stringify({
-      id: p.pid,
-      name: p.productNameEn,
-      description: p.description,
-      images: p.productImageSet,
-      variants,
-    }),
-    { headers: { "Content-Type": "application/json", ...corsHeaders(env) } }
-  );
+  const finalDetailData = JSON.stringify({
+    id: p.pid,
+    name: p.productNameEn,
+    description: p.description,
+    images: p.productImageSet,
+    variants,
+  });
+
+  // Product detail ko bhi 5 minutes ke liye cache karein
+  await env.TOKEN_STORE.put(cacheKey, finalDetailData, { expirationTtl: 300 });
+
+  return new Response(finalDetailData, { 
+    headers: { "Content-Type": "application/json", ...corsHeaders(env), "X-Cache": "MISS" } 
+  });
 }
 
 // ---------- Rapid Gateway: get OAuth2 access token ----------
@@ -263,8 +292,6 @@ async function pushOrderToCJ(env, orderRecord) {
 
 // ---------- Webhook: signature verification ----------
 async function verifyRapidGatewaySignature(req, env, rawBody) {
-  // CONFIG: exact timestamp header name to be confirmed from a real webhook delivery —
-  // using the most common convention until then.
   const signature = req.headers.get("X-RapidGateway-Signature") || "";
   const timestamp = req.headers.get("X-RapidGateway-Timestamp") || "";
   if (!signature || !timestamp) return false;
@@ -296,7 +323,7 @@ async function handlePaymentWebhook(req, env) {
 
   const body = JSON.parse(rawBody);
   const orderNumber = body.BASKET_ID || body.reference || body.orderNumber;
-  const paymentStatus = body.status || body.TXN_STATUS; // CONFIG: confirm exact field name
+  const paymentStatus = body.status || body.TXN_STATUS; 
 
   if (!orderNumber) {
     return new Response(JSON.stringify({ error: "Missing order reference" }), { status: 400 });
@@ -364,4 +391,3 @@ export default {
     }
   },
 };
-    
