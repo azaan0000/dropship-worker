@@ -1,10 +1,10 @@
-name = "dropship-automation-backend"
+Name = "dropship-automation-backend"
 main = "worker.js"
 compatibility_date = "2024-11-01"
 
 [vars]
 MARKUP_PERCENT = "40"
-STORE_ORIGIN = "https://azaan0000.github.io/dropship-store"
+STORE_ORIGIN = "https://azaan0000.github.io"
 WORKER_ORIGIN = "https://dropship-worker.azaanbk30.workers.dev"
 STORE_NAME = "Drift Store"
 RAPIDGATEWAY_API_BASE = "https://secure.rapid-gateway.com"
