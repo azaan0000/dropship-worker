@@ -193,6 +193,11 @@ async function handleCheckoutCreate(req, env) {
 
   const token = await getRapidGatewayToken(env);
 
+  // GitHub Pages ke sub-path ke liye manually path add kiya gaya hai
+  const successUrl = `${env.STORE_ORIGIN}/dropship-store/order-status.html?status=success&ref=${orderNumber}`;
+  const failureUrl = `${env.STORE_ORIGIN}/dropship-store/order-status.html?status=failed&ref=${orderNumber}`;
+  const checkoutUrlRedirect = `${env.STORE_ORIGIN}/dropship-store/order-status.html?status=complete&ref=${orderNumber}`;
+
   const txnRes = await fetch(`${env.RAPIDGATEWAY_API_BASE}/rapid/process-transaction`, {
     method: "POST",
     redirect: "manual", // capture the redirect Location instead of following it
@@ -210,9 +215,9 @@ async function handleCheckoutCreate(req, env) {
       BASKET_ID: orderNumber,
       TXNDESC: `Order ${orderNumber}`,
       ORDER_DATE: new Date().toISOString().slice(0, 10),
-      SUCCESS_URL: `${env.STORE_ORIGIN}/order-status.html?status=success&ref=${orderNumber}`,
-      FAILURE_URL: `${env.STORE_ORIGIN}/order-status.html?status=failed&ref=${orderNumber}`,
-      CHECKOUT_URL: `${env.STORE_ORIGIN}/order-status.html?status=complete&ref=${orderNumber}`,
+      SUCCESS_URL: successUrl,
+      FAILURE_URL: failureUrl,
+      CHECKOUT_URL: checkoutUrlRedirect,
       VERSION: "MY_VER_1.0",
       PROCCODE: "0",
     }).toString(),
@@ -359,3 +364,4 @@ export default {
     }
   },
 };
+    
