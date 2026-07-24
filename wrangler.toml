@@ -10,6 +10,8 @@ STORE_NAME = "Drift Store"
 RAPIDGATEWAY_API_BASE = "https://secure.rapid-gateway.com"
 RAPIDGATEWAY_MERCHANT_ID = "576"
 CJ_PROXY_BASE = "https://cj-proxy-azaanzahoors-projects.vercel.app/api2.0/v1"
+NOTION_DATABASE_ID = "f82e8528981e48628aab4286c50b9023"
+NEWSLETTER_DATABASE_ID = "22486626281743018558d21d44b416c0"
 
 # KV namespace for caching CJ access tokens
 # Create it first: wrangler kv namespace create TOKEN_STORE
